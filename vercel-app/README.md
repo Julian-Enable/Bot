@@ -61,19 +61,9 @@ git add .
 git commit -m "Initial commit: contrib bot con GitHub App"
 ```
 
-2. **Crea un repo en GitHub**:
-   - Ve a https://github.com/new
-   - Nombre: `Bot` (o el que prefieras)
-   - Público o privado (tu elección)
-   - No inicialices con README (ya tienes código)
-   - Crea el repositorio
-
-3. **Sube el código**:
-```powershell
-git remote add origin https://github.com/tuUsuario/Bot.git
-git branch -M main
-git push -u origin main
-```
+2. **✅ Ya hecho**: El repositorio ya está creado en GitHub:
+   - **URL**: https://github.com/Julian-Enable/Bot
+   - El código ya está subido y listo
 
 ---
 
@@ -109,7 +99,7 @@ git push -u origin main
    |-----|-------|-------|
    | `APP_ID` | `123456` | El App ID que copiaste de GitHub |
    | `PRIVATE_KEY` | *contenido del .pem* | Ver instrucciones abajo ⬇️ |
-   | `TARGET_REPO` | `tuUsuario/Bot` | Formato: `owner/repo` |
+   | `TARGET_REPO` | `Julian-Enable/Bot` | Tu repositorio (formato: owner/repo) |
    | `COMMIT_NAME` | `Tu Nombre` | Tu nombre real |
    | `COMMIT_EMAIL` | `tu@email.com` | Email verificado en GitHub |
    | `BOT_BRANCH` | `contrib-bot` | Opcional (por defecto `contrib-bot`) |
