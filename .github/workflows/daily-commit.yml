@@ -1,0 +1,30 @@
+name: Daily commit to keep contributions green
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # daily at 00:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false # we'll use a PAT to push
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Run daily commit script
+        env:
+          PAT: ${{ secrets.PAT }}
+          COMMIT_NAME: ${{ secrets.COMMIT_NAME }}
+          COMMIT_EMAIL: ${{ secrets.COMMIT_EMAIL }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF: ${{ github.ref }}
+        run: |
+          python scripts/daily_commit.py
