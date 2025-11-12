@@ -21,7 +21,8 @@ from datetime import datetime, timezone
 
 def run(cmd):
     print('>',' '.join(cmd))
-    subprocess.run(cmd, check=True)
+    result = subprocess.run(cmd, check=True)
+    return result
 
 
 repo = os.environ.get('GITHUB_REPOSITORY')
@@ -65,12 +66,18 @@ run(['git', 'config', 'user.email', email])
 # Create or switch to the bot branch (non-destructive for default branches)
 run(['git', 'checkout', '-B', branch])
 
+# Try to pull latest changes from remote branch (ignore errors if branch doesn't exist yet)
+push_url = f'https://x-access-token:{pat}@github.com/{repo}.git'
+try:
+    run(['git', 'pull', push_url, branch, '--rebase'])
+except subprocess.CalledProcessError:
+    print('Branch does not exist remotely yet or pull failed, continuing...')
+
 # git add/commit
 run(['git', 'add', str(f)])
 msg = f'chore: daily contribution update {now}'
 run(['git', 'commit', '-m', msg])
 
 # push directly using PAT embedded URL to avoid changing origin permanently
-push_url = f'https://x-access-token:{pat}@github.com/{repo}.git'
 run(['git', 'push', push_url, f'HEAD:refs/heads/{branch}'])
 
