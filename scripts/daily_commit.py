@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Non-intrusive script to update a file and push a commit using a PAT to a dedicated branch.
 
-This script writes a timestamped line to `contributions/keep_alive.md` and pushes to a separate
+This script writes a timestamped line to individual files and pushes to a separate
 branch (default `contrib-bot`) so the repository's main branches are not modified.
+
+Multiple runs per day create separate files to avoid conflicts.
 
 Environment variables expected (set by the workflow):
 - PAT: personal access token with repo permissions
@@ -38,37 +40,23 @@ if not name or not email:
 # Use a dedicated branch so we don't touch default branches
 branch = os.environ.get('BOT_BRANCH', 'contrib-bot')
 
-# prepare file
+# Create unique file for each execution to avoid conflicts
+# Format: YYYY/MM/DD/HH-MM-SS.md
 p = Path('contributions')
-p.mkdir(exist_ok=True)
-f = p / 'keep_alive.md'
 now_dt = datetime.now(timezone.utc)
-now = now_dt.isoformat().replace('+00:00', 'Z')
-line = f'- {now}\n'
+year_dir = p / str(now_dt.year)
+month_dir = year_dir / f"{now_dt.month:02d}"
+day_dir = month_dir / f"{now_dt.day:02d}"
+day_dir.mkdir(parents=True, exist_ok=True)
 
-# avoid duplicate commits on the same UTC day
-if f.exists():
-    text = f.read_text(encoding='utf-8')
-    lines = [l for l in text.splitlines() if l.strip()]
-    if lines:
-        last = lines[-1]
-        if last.startswith('- '):
-            ts = last[2:].strip()
-            try:
-                # handle ISO Z suffix
-                if ts.endswith('Z'):
-                    ts = ts.rstrip('Z')
-                last_dt = datetime.fromisoformat(ts)
-                if last_dt.date() == now_dt.date():
-                    print('No commit: already committed today (UTC).')
-                    raise SystemExit(0)
-            except Exception:
-                # if parsing fails, continue and append anyway
-                pass
-    text = text + line
-    f.write_text(text, encoding='utf-8')
-else:
-    f.write_text(line, encoding='utf-8')
+# Create unique file for this execution
+filename = f"{now_dt.hour:02d}-{now_dt.minute:02d}-{now_dt.second:02d}.md"
+f = day_dir / filename
+now = now_dt.isoformat().replace('+00:00', 'Z')
+content = f"# Activity Log\n\nTimestamp: {now}\n\nThis is an automated commit to maintain contribution activity.\n"
+
+# Write the file (each execution creates a new file, no conflicts)
+f.write_text(content, encoding='utf-8')
 
 # Configure git author locally
 run(['git', 'config', 'user.name', name])

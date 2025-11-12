@@ -2,7 +2,17 @@ name: Daily commit to keep contributions green
 
 on:
   schedule:
-    - cron: '0 0 * * *' # daily at 00:00 UTC
+    # Multiple times throughout the day to create 5-15 commits distributed
+    - cron: '0 0 * * *'   # 00:00 UTC
+    - cron: '30 2 * * *'  # 02:30 UTC
+    - cron: '0 5 * * *'   # 05:00 UTC
+    - cron: '45 7 * * *'  # 07:45 UTC
+    - cron: '15 10 * * *' # 10:15 UTC
+    - cron: '30 12 * * *' # 12:30 UTC
+    - cron: '0 15 * * *'  # 15:00 UTC
+    - cron: '45 17 * * *' # 17:45 UTC
+    - cron: '20 20 * * *' # 20:20 UTC
+    - cron: '50 22 * * *' # 22:50 UTC
   workflow_dispatch: {}
 
 jobs:
