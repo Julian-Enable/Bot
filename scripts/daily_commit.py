@@ -63,21 +63,37 @@ f.write_text(content, encoding='utf-8')
 run(['git', 'config', 'user.name', name])
 run(['git', 'config', 'user.email', email])
 
-# Create or switch to the bot branch (non-destructive for default branches)
-run(['git', 'checkout', '-B', branch])
-
-# Try to pull latest changes from remote branch (ignore errors if branch doesn't exist yet)
+# Set up remote with PAT
 push_url = f'https://x-access-token:{pat}@github.com/{repo}.git'
+run(['git', 'remote', 'set-url', 'origin', push_url])
+
+# Fetch latest from remote
+run(['git', 'fetch', 'origin'])
+
+# Try to checkout existing remote branch or create new one
 try:
-    run(['git', 'pull', push_url, branch, '--rebase'])
+    run(['git', 'checkout', branch])
+    # If branch exists, pull latest changes
+    run(['git', 'pull', 'origin', branch, '--no-rebase'])
 except subprocess.CalledProcessError:
-    print('Branch does not exist remotely yet or pull failed, continuing...')
+    # Branch doesn't exist locally, create it
+    try:
+        run(['git', 'checkout', '-b', branch, f'origin/{branch}'])
+    except subprocess.CalledProcessError:
+        # Remote branch doesn't exist either, create new branch
+        run(['git', 'checkout', '-b', branch])
 
 # git add/commit
 run(['git', 'add', str(f)])
 msg = f'chore: daily contribution update {now}'
 run(['git', 'commit', '-m', msg])
 
-# push directly using PAT embedded URL to avoid changing origin permanently
-run(['git', 'push', push_url, f'HEAD:refs/heads/{branch}'])
+# Push with force-with-lease to handle concurrent updates safely
+try:
+    run(['git', 'push', 'origin', f'{branch}:{branch}'])
+except subprocess.CalledProcessError:
+    # If push fails due to concurrent update, pull and try again
+    print('Push failed, pulling latest changes and retrying...')
+    run(['git', 'pull', 'origin', branch, '--no-rebase', '--strategy=recursive', '--strategy-option=theirs'])
+    run(['git', 'push', 'origin', f'{branch}:{branch}'])
 
