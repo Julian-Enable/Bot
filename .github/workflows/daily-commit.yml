@@ -22,6 +22,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: master  # Always use code from master branch
           persist-credentials: false # we'll use a PAT to push
 
       - name: Set up Python
