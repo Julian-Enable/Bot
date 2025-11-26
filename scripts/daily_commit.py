@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Non-intrusive script to update a file and push a commit using a PAT to a dedicated branch.
+"""Non-intrusive script to update a file and push a commit using a PAT to the default branch.
 
-This script writes a timestamped line to individual files and pushes to a separate
-branch (default `contrib-bot`) so the repository's main branches are not modified.
+This script writes a timestamped line to individual files in the contributions folder
+and pushes to the default branch (default `master`) so the commits count as contributions on GitHub.
 
 Multiple runs per day create separate files to avoid conflicts.
 
@@ -11,7 +11,7 @@ Environment variables expected (set by the workflow):
 - COMMIT_NAME: the name to use as commit author
 - COMMIT_EMAIL: the email to use as commit author (must be associated with your GitHub account)
 - GITHUB_REPOSITORY: owner/repo
-- BOT_BRANCH (optional): branch to use for bot commits (default: contrib-bot)
+- BOT_BRANCH (optional): branch to use for bot commits (default: master)
 """
 import os
 import subprocess
@@ -38,8 +38,8 @@ email = os.environ.get('COMMIT_EMAIL')
 if not name or not email:
     raise SystemExit('COMMIT_NAME and COMMIT_EMAIL secrets are required and must match your GitHub account.')
 
-# Use a dedicated branch so we don't touch default branches
-branch = os.environ.get('BOT_BRANCH', 'contrib-bot')
+# Use the default branch so commits count as contributions on GitHub
+branch = os.environ.get('BOT_BRANCH', 'master')
 
 # Create unique file for each execution to avoid conflicts
 # Format: YYYY/MM/DD/HH-MM-SS.md
