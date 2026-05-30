@@ -1,3 +1,5 @@
+// <a href="https://t.me/+pMrSgBj_JpFjODgx">@AsociancionDelCriterio</a>
+
 import { useState, useEffect } from 'react';
 
 export default function Home() {
