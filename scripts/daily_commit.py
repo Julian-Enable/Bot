@@ -1,116 +1,177 @@
 #!/usr/bin/env python3
-"""Non-intrusive script to update a file and push a commit using a PAT to the default branch.
+"""Non-intrusive script to update a file and push a commit using a PAT.
 
-This script writes a timestamped line to individual files in the contributions folder
-and pushes to the default branch (default `master`) so the commits count as contributions on GitHub.
+Writes a timestamped line in contributions/YYYY/MM/DD/ and pushes a single
+commit per run to the configured branch (default: contrib-bot).
 
-The workflow may run several times per day, but the script self-limits the daily total.
-At the start it derives a target number of commits for the day (a stable random value
-between 1 and 50, seeded by the UTC date), counts how many commits already exist for
-today, and only creates the remaining ones. This makes the daily total highly variable
-(e.g. one day 1, another 25, another 40) while never going below 1 or above 50.
-
-Environment variables expected (set by the workflow):
+Environment variables expected:
 - PAT: personal access token with repo permissions
-- COMMIT_NAME: the name to use as commit author
-- COMMIT_EMAIL: the email to use as commit author (must be associated with your GitHub account)
+- COMMIT_NAME: commit author name
+- COMMIT_EMAIL: commit author email (must match your GitHub account)
 - GITHUB_REPOSITORY: owner/repo
-- BOT_BRANCH (optional): branch to use for bot commits (default: master)
+- BOT_BRANCH: branch for bot commits (default: contrib-bot)
 """
+
 import os
 import subprocess
-import random
-from pathlib import Path
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
+
+MAX_RETRIES = 3
 
 
 def run(cmd):
-    print('>',' '.join(cmd))
-    result = subprocess.run(cmd, check=True)
+    """Run a git command, print command and any error output."""
+    print("> ", " ".join(cmd), flush=True)
+    result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    if result.returncode != 0:
+        err = result.stderr.strip() if result.stderr else result.stdout.strip()
+        print(f"  ERROR (code {result.returncode}): {err}", file=sys.stderr, flush=True)
     return result
 
 
-repo = os.environ.get('GITHUB_REPOSITORY')
-if not repo:
-    raise SystemExit('GITHUB_REPOSITORY is required')
+def run_check(cmd):
+    """Run a git command and raise SystemExit on failure."""
+    result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    if result.returncode != 0:
+        err = result.stderr.strip() if result.stderr else result.stdout.strip()
+        raise SystemExit(f"Command failed: {' '.join(cmd)}\n{err}")
+    return result
 
-pat = os.environ.get('PAT')
-if not pat:
-    raise SystemExit('PAT secret is required. Create a repo secret named PAT with a personal access token.')
 
-name = os.environ.get('COMMIT_NAME')
-email = os.environ.get('COMMIT_EMAIL')
-if not name or not email:
-    raise SystemExit('COMMIT_NAME and COMMIT_EMAIL secrets are required and must match your GitHub account.')
+def git_config(name, value):
+    run_check(["git", "config", name, value])
 
-# Use the default branch so commits count as contributions on GitHub
-branch = os.environ.get('BOT_BRANCH', 'master')
 
-# Configure git author locally
-run(['git', 'config', 'user.name', name])
-run(['git', 'config', 'user.email', email])
+def setup_remote(repo, pat):
+    push_url = f"https://x-access-token:{pat}@github.com/{repo}.git"
+    run_check(["git", "remote", "set-url", "origin", push_url])
 
-# Set up remote with PAT
-push_url = f'https://x-access-token:{pat}@github.com/{repo}.git'
-run(['git', 'remote', 'set-url', 'origin', push_url])
 
-# Fetch latest from remote
-run(['git', 'fetch', 'origin'])
+def checkout_branch(branch):
+    """Try to checkout existing branch or create it."""
+    r = run(["git", "checkout", branch])
+    if r.returncode == 0:
+        r = run(["git", "pull", "origin", branch, "--no-rebase"])
+        if r.returncode != 0:
+            print(f"Pull failed, resetting to origin/{branch}", file=sys.stderr, flush=True)
+            run(["git", "fetch", "origin"])
+            run(["git", "reset", "--hard", f"origin/{branch}"])
+        return
 
-# Try to checkout existing remote branch or create new one
-try:
-    run(['git', 'checkout', branch])
-    # If branch exists, pull latest changes
-    run(['git', 'pull', 'origin', branch, '--no-rebase'])
-except subprocess.CalledProcessError:
-    # Branch doesn't exist locally, create it
-    try:
-        run(['git', 'checkout', '-b', branch, f'origin/{branch}'])
-    except subprocess.CalledProcessError:
-        # Remote branch doesn't exist either, create new branch
-        run(['git', 'checkout', '-b', branch])
+    r = run(["git", "checkout", "-b", branch, f"origin/{branch}"])
+    if r.returncode == 0:
+        return
 
-# Daily target: a stable random value between 1 and 50, seeded by the UTC date,
-# so every run on the same day agrees on the same target.
-today = datetime.now(timezone.utc)
-day_dir = Path('contributions') / str(today.year) / f"{today.month:02d}" / f"{today.day:02d}"
-daily_target = random.Random(f'{repo}:{today:%Y-%m-%d}').randint(1, 50)
+    r = run(["git", "checkout", "-b", branch])
+    if r.returncode != 0:
+        raise SystemExit(f"Could not checkout or create branch '{branch}'")
 
-# How many commits already exist for today (files created by earlier runs).
-already_done = len(list(day_dir.glob('*.md'))) if day_dir.exists() else 0
-remaining = max(0, daily_target - already_done)
-print(f"Daily target: {daily_target}, already done today: {already_done}, remaining: {remaining}")
 
-if remaining == 0:
-    print('Daily target already reached. Nothing to do.')
-    raise SystemExit(0)
+def count_today(day_dir):
+    if day_dir.exists():
+        return len(list(day_dir.glob("*.md")))
+    return 0
 
-day_dir.mkdir(parents=True, exist_ok=True)
-for i in range(remaining):
-    # Unique file per commit. Format: YYYY/MM/DD/HH-MM-SS-N.md
-    now_dt = datetime.now(timezone.utc)
-    # Number this commit within the whole day so filenames never collide
-    # with files created by earlier runs today.
-    n = already_done + i + 1
+
+def create_commit(day_dir, n, daily_target, now_dt):
     filename = f"{now_dt.hour:02d}-{now_dt.minute:02d}-{now_dt.second:02d}-{n}.md"
     f = day_dir / filename
-    now = now_dt.isoformat().replace('+00:00', 'Z')
-    content = f"# Activity Log\n\nTimestamp: {now}\nCommit: {n}/{daily_target}\n\nThis is an automated commit to maintain contribution activity.\n"
+    now = now_dt.isoformat().replace("+00:00", "Z")
+    content = (
+        f"# Activity Log\n\n"
+        f"Timestamp: {now}\n"
+        f"Commit: {n}/{daily_target}\n\n"
+        f"This is an automated commit to maintain contribution activity.\n"
+    )
+    f.write_text(content, encoding="utf-8")
 
-    # Write the file (unique name, no conflicts)
-    f.write_text(content, encoding='utf-8')
+    r = run(["git", "add", str(f)])
+    if r.returncode != 0:
+        print(f"  git add failed for {f}", file=sys.stderr, flush=True)
+        return False
 
-    # git add/commit
-    run(['git', 'add', str(f)])
-    msg = f'chore: contribution update {now}'
-    run(['git', 'commit', '-m', msg])
+    msg = f"chore: contribution update {now}"
+    r = run(["git", "commit", "-m", msg])
+    if r.returncode != 0:
+        print(f"  git commit failed for {f}", file=sys.stderr, flush=True)
+        return False
+    return True
 
-# Push all commits at once
-try:
-    run(['git', 'push', 'origin', f'{branch}:{branch}'])
-except subprocess.CalledProcessError:
-    # If push fails due to concurrent update, pull and try again
-    print('Push failed, pulling latest changes and retrying...')
-    run(['git', 'pull', 'origin', branch, '--no-rebase', '--strategy=recursive', '--strategy-option=theirs'])
-    run(['git', 'push', 'origin', f'{branch}:{branch}'])
 
+def push_with_retry(branch):
+    """Try to push, with fallback pull+push on conflict."""
+    for attempt in range(1, MAX_RETRIES + 1):
+        r = run(["git", "push", "origin", f"{branch}:{branch}"])
+        if r.returncode == 0:
+            print(f"  Push succeeded on attempt {attempt}", flush=True)
+            return True
+
+        if attempt < MAX_RETRIES:
+            print(f"  Push failed (attempt {attempt}), pulling and retrying...", file=sys.stderr, flush=True)
+            run(["git", "fetch", "origin"])
+            r = run(["git", "pull", "origin", branch, "--no-rebase", "--strategy=recursive", "--strategy-option=theirs"])
+            if r.returncode != 0:
+                print("  Pull failed, resetting to origin...", file=sys.stderr, flush=True)
+                run(["git", "reset", "--hard", f"origin/{branch}"])
+
+    return False
+
+
+def main():
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    if not repo:
+        raise SystemExit("GITHUB_REPOSITORY is required")
+
+    pat = os.environ.get("PAT")
+    if not pat:
+        raise SystemExit("PAT secret is required. Create a repo secret named PAT with a personal access token.")
+
+    name = os.environ.get("COMMIT_NAME")
+    email = os.environ.get("COMMIT_EMAIL")
+    if not name or not email:
+        raise SystemExit("COMMIT_NAME and COMMIT_EMAIL secrets are required.")
+
+    branch = os.environ.get("BOT_BRANCH", "contrib-bot")
+
+    today = datetime.now(timezone.utc)
+    day_dir = Path("contributions") / str(today.year) / f"{today.month:02d}" / f"{today.day:02d}"
+
+    # Configure git
+    git_config("user.name", name)
+    git_config("user.email", email)
+    setup_remote(repo, pat)
+
+    # Fetch and checkout
+    run(["git", "fetch", "origin"])
+    checkout_branch(branch)
+
+    # Determine how many commits already exist today
+    already_done = count_today(day_dir)
+    daily_target = 1  # One commit per run is enough to keep the graph green
+    remaining = max(0, daily_target - already_done)
+
+    print(f"Branch: {branch} | Today: {today:%Y-%m-%d} | Already done: {already_done} | Remaining: {remaining}")
+
+    if remaining == 0:
+        print("Daily contribution already exists. Nothing to do.")
+        sys.exit(0)
+
+    day_dir.mkdir(parents=True, exist_ok=True)
+
+    now_dt = datetime.now(timezone.utc)
+    if not create_commit(day_dir, already_done + 1, daily_target, now_dt):
+        raise SystemExit("Failed to create commit")
+
+    # Push with retry
+    success = push_with_retry(branch)
+    if not success:
+        print("WARNING: Could not push commits. They exist locally but may not be on GitHub.", file=sys.stderr)
+        sys.exit(1)
+
+    print("Done! Contribution recorded.")
+
+
+if __name__ == "__main__":
+    main()
